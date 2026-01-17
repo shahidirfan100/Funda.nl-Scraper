@@ -52,6 +52,89 @@ const proxyConfig = await Actor.createProxyConfiguration(proxyConfiguration);
 let pagesVisited = 0;
 const collectedIds = new Set();
 
+/**
+ * Resolve Nuxt 3 flattened array references
+ * Nuxt 3 stores data as a flat array where object properties are indices to other array elements
+ */
+function resolveNuxtValue(data, val, depth = 0) {
+    if (depth > 5) return val; // Prevent infinite loops
+
+    if (typeof val === 'number' && val >= 0 && val < data.length) {
+        const target = data[val];
+        if (Array.isArray(target)) {
+            return target.map(i => resolveNuxtValue(data, i, depth + 1));
+        } else if (target && typeof target === 'object') {
+            const resolved = {};
+            for (const key in target) {
+                resolved[key] = resolveNuxtValue(data, target[key], depth + 1);
+            }
+            return resolved;
+        }
+        return target;
+    }
+    return val;
+}
+
+/**
+ * Find the search results object in Nuxt 3 data
+ */
+function findListingsInNuxtData(data) {
+    // Search for object containing 'listings' key
+    for (let i = 0; i < data.length; i++) {
+        const item = data[i];
+        if (item && typeof item === 'object' && item.listings !== undefined) {
+            log.info(`Found listings reference at index ${i}`);
+
+            // listings is an index pointing to an array
+            const listingsArrayIndex = item.listings;
+            const listingsArray = data[listingsArrayIndex];
+
+            if (Array.isArray(listingsArray)) {
+                log.info(`Listings array at index ${listingsArrayIndex} has ${listingsArray.length} items`);
+
+                // Each element is an index to a listing object
+                const resolvedListings = listingsArray.map(idx => {
+                    const listingObj = data[idx];
+                    if (listingObj && typeof listingObj === 'object') {
+                        // Resolve all properties
+                        const resolved = {};
+                        for (const key in listingObj) {
+                            resolved[key] = resolveNuxtValue(data, listingObj[key], 0);
+                        }
+                        return resolved;
+                    }
+                    return null;
+                }).filter(Boolean);
+
+                return resolvedListings;
+            }
+        }
+    }
+
+    // Fallback: Find objects that look like listings (have address and price)
+    log.info('Searching for listing objects directly...');
+    const directListings = [];
+    for (let i = 0; i < data.length; i++) {
+        const item = data[i];
+        if (item && typeof item === 'object' &&
+            (item.address !== undefined || item.floor_area !== undefined) &&
+            item.price !== undefined) {
+            const resolved = {};
+            for (const key in item) {
+                resolved[key] = resolveNuxtValue(data, item[key], 0);
+            }
+            directListings.push(resolved);
+        }
+    }
+
+    if (directListings.length > 0) {
+        log.info(`Found ${directListings.length} listing objects directly`);
+        return directListings;
+    }
+
+    return null;
+}
+
 const crawler = new CheerioCrawler({
     maxConcurrency: 3,
     maxRequestRetries: 5,
@@ -116,20 +199,19 @@ const crawler = new CheerioCrawler({
         pagesVisited++;
         log.info(`Processing listing page ${pagesVisited}/${max_pages}: ${url}`);
 
-        let items = [];
+        let listings = [];
 
-        // PRIORITY 1: Try __NUXT_DATA__
+        // PRIORITY 1: Try __NUXT_DATA__ (Nuxt 3 format)
         const nuxtDataScript = $('#__NUXT_DATA__').html();
         if (nuxtDataScript) {
             try {
                 const data = JSON.parse(nuxtDataScript);
+                log.info(`Parsed __NUXT_DATA__ with ${data.length} elements`);
 
-                for (const item of data) {
-                    if (item && typeof item === 'object' && Array.isArray(item.listings) && item.listings.length > 0) {
-                        items = item.listings;
-                        log.info(`Extracted ${items.length} from __NUXT_DATA__`);
-                        break;
-                    }
+                listings = findListingsInNuxtData(data);
+
+                if (listings && listings.length > 0) {
+                    log.info(`Extracted ${listings.length} listings from __NUXT_DATA__`);
                 }
             } catch (e) {
                 log.warning(`__NUXT_DATA__ parse failed: ${e.message}`);
@@ -137,23 +219,23 @@ const crawler = new CheerioCrawler({
         }
 
         // PRIORITY 1b: Try JSON-LD as fallback
-        if (items.length === 0) {
+        if (!listings || listings.length === 0) {
             $('script[type="application/ld+json"]').each((_, el) => {
                 try {
                     const json = JSON.parse($(el).text());
                     if (json['@type'] === 'ItemList' && json.itemListElement) {
-                        items = json.itemListElement.map(item => ({
+                        listings = json.itemListElement.map(item => ({
                             url: item.url,
                             address: item.name,
                         }));
-                        log.info(`Extracted ${items.length} from JSON-LD ItemList`);
+                        log.info(`Extracted ${listings.length} from JSON-LD ItemList`);
                     }
                 } catch { }
             });
         }
 
         // No data extracted - save debug HTML
-        if (items.length === 0) {
+        if (!listings || listings.length === 0) {
             log.warning('No data extracted! Saving debug HTML...');
             await Actor.setValue(`debug-page-${pagesVisited}`, $.html(), { contentType: 'text/html' });
             return;
@@ -169,28 +251,37 @@ const crawler = new CheerioCrawler({
         }
 
         const itemsToPush = [];
-        for (const listing of items) {
+        for (const listing of listings) {
             if (remaining <= 0) break;
 
-            const id = listing.globalId || listing.id || listing.url;
-            if (collectedIds.has(id)) continue;
+            // Extract ID from various possible locations
+            const id = listing.id || listing.globalId || listing.object_detail_page_relative_url;
+            if (!id || collectedIds.has(id)) continue;
             collectedIds.add(id);
 
+            // Build normalized output object
             const item = {
-                id: listing.globalId || listing.id,
-                address: listing.address,
-                postalCode: listing.zipCode,
-                city: listing.city,
-                price: listing.price?.value || listing.price,
+                id: listing.id || listing.globalId,
+                address: typeof listing.address === 'object'
+                    ? `${listing.address.street || ''} ${listing.address.house_number || ''}`.trim()
+                    : listing.address,
+                postalCode: listing.address?.postal_code || listing.zipCode,
+                city: listing.address?.city || listing.city,
+                price: typeof listing.price === 'object'
+                    ? listing.price.selling_price || listing.price.value
+                    : listing.price,
                 priceCurrency: "EUR",
-                floorArea: listing.floorArea,
-                plotArea: listing.plotArea,
-                rooms: listing.rooms,
-                url: listing.url,
+                floorArea: listing.floor_area || listing.floorArea,
+                plotArea: listing.plot_area || listing.plotArea,
+                rooms: listing.number_of_rooms || listing.rooms,
+                bedrooms: listing.number_of_bedrooms,
+                url: listing.object_detail_page_relative_url || listing.url,
                 imageUrl: listing.images?.[0]?.url || listing.mainImage?.url || listing.photo,
+                energyLabel: listing.energy_label,
                 scrapedAt: new Date().toISOString()
             };
 
+            // Normalize URL
             if (item.url && !item.url.startsWith('http')) {
                 item.url = `https://www.funda.nl${item.url}`;
             }
@@ -199,11 +290,13 @@ const crawler = new CheerioCrawler({
             remaining--;
         }
 
-        await Dataset.pushData(itemsToPush);
-        log.info(`Pushed ${itemsToPush.length} listings. Total: ${collectedIds.size}/${results_wanted}`);
+        if (itemsToPush.length > 0) {
+            await Dataset.pushData(itemsToPush);
+            log.info(`Pushed ${itemsToPush.length} listings. Total: ${collectedIds.size}/${results_wanted}`);
+        }
 
         // Pagination
-        if (collectedIds.size < results_wanted && pagesVisited < max_pages && items.length > 0) {
+        if (collectedIds.size < results_wanted && pagesVisited < max_pages && listings.length > 0) {
             const urlObj = new URL(url);
             const currentPage = parseInt(urlObj.searchParams.get('page') || '1');
             const nextPage = currentPage + 1;
