@@ -42,7 +42,7 @@ const collectedIds = new Set();
 // Resolve Nuxt 3 flattened array references with circular reference protection
 function resolve(data, val, seen = new Set()) {
     if (typeof val !== 'number' || val < 0 || val >= data.length) return val;
-    if (seen.has(val)) return null; // Circular reference
+    if (seen.has(val)) return null;
     seen.add(val);
 
     const item = data[val];
@@ -59,53 +59,7 @@ function resolve(data, val, seen = new Set()) {
     return res;
 }
 
-// Find and resolve all listings from Nuxt 3 data
-function extractListings(data) {
-    log.info(`Searching ${data.length} elements for listings...`);
-
-    for (let i = 0; i < data.length; i++) {
-        const item = data[i];
-        if (item && typeof item === 'object' && item.listings !== undefined) {
-            log.info(`Found 'listings' key at index ${i}, value: ${item.listings}`);
-
-            const listings = resolve(data, item.listings);
-            log.info(`Resolved listings type: ${typeof listings}, isArray: ${Array.isArray(listings)}, length: ${listings?.length || 0}`);
-
-            if (Array.isArray(listings) && listings.length > 0) {
-                const first = listings[0];
-                log.info(`First listing keys: ${first ? Object.keys(first).join(', ') : 'null'}`);
-
-                // Return if it looks like property data
-                if (first && typeof first === 'object') {
-                    return listings;
-                }
-            }
-        }
-    }
-
-    // Fallback: search for objects that look like listings directly
-    log.info('Primary search failed, trying fallback...');
-    const directListings = [];
-    for (let i = 0; i < data.length; i++) {
-        const item = data[i];
-        if (item && typeof item === 'object' &&
-            (item.object_detail_page_relative_url !== undefined ||
-                item.floor_area !== undefined ||
-                item.number_of_rooms !== undefined)) {
-            const resolved = resolve(data, i);
-            if (resolved) directListings.push(resolved);
-        }
-    }
-
-    if (directListings.length > 0) {
-        log.info(`Fallback found ${directListings.length} listings`);
-        return directListings;
-    }
-
-    return null;
-}
-
-// Extract value from array or direct value (Nuxt stores single values as arrays)
+// Extract value from array or direct value
 function getValue(val) {
     if (Array.isArray(val)) return val[0];
     return val;
@@ -117,11 +71,31 @@ function buildImageUrl(thumbnailId) {
     if (!id) return null;
 
     const idStr = String(id).padStart(9, '0');
-    const part1 = idStr.slice(0, 3);
-    const part2 = idStr.slice(3, 6);
-    const part3 = idStr.slice(6, 9);
+    return `https://cloud.funda.nl/valentina_media/${idStr.slice(0, 3)}/${idStr.slice(3, 6)}/${idStr.slice(6, 9)}.jpg`;
+}
 
-    return `https://cloud.funda.nl/valentina_media/${part1}/${part2}/${part3}.jpg`;
+// Find actual property listings from Nuxt 3 data
+// Property listings have: thumbnail_id, object_detail_page_relative_url, address
+function extractListings(data) {
+    const listings = [];
+
+    for (let i = 0; i < data.length; i++) {
+        const item = data[i];
+        // Real property listings have thumbnail_id AND object_detail_page_relative_url
+        if (item && typeof item === 'object' &&
+            item.thumbnail_id !== undefined &&
+            item.object_detail_page_relative_url !== undefined) {
+            const resolved = resolve(data, i);
+            if (resolved) listings.push(resolved);
+        }
+    }
+
+    if (listings.length > 0) {
+        log.info(`Found ${listings.length} property listings`);
+        return listings;
+    }
+
+    return null;
 }
 
 const crawler = new CheerioCrawler({
@@ -165,20 +139,13 @@ const crawler = new CheerioCrawler({
             return;
         }
 
-        // Debug: Log first listing's keys to see available fields
-        if (listings.length > 0) {
-            const firstListing = listings[0];
-            log.info(`First listing fields: ${Object.keys(firstListing).join(', ')}`);
-            log.info(`thumbnail_id value: ${JSON.stringify(firstListing.thumbnail_id)}`);
-        }
-
         let remaining = results_wanted - collectedIds.size;
         const itemsToPush = [];
 
         for (let i = 0; i < listings.length && remaining > 0; i++) {
             const listing = listings[i];
 
-            // Extract ID from URL path or use internal id
+            // Extract ID from URL path
             const urlPath = listing.object_detail_page_relative_url || '';
             const urlIdMatch = urlPath.match(/\/(\d+)\/?$/);
             const propertyId = urlIdMatch ? urlIdMatch[1] : (listing.id || `${pagesVisited}-${i}`);
@@ -190,13 +157,13 @@ const crawler = new CheerioCrawler({
             let url = listing.object_detail_page_relative_url;
             if (url && !url.startsWith('http')) url = `https://www.funda.nl${url}`;
 
-            // Extract address components (Nuxt uses street_name not street)
+            // Extract address components
             const addr = listing.address || {};
             const streetName = addr.street_name || addr.street || '';
             const houseNumber = addr.house_number || '';
             const fullAddress = `${streetName} ${houseNumber}`.trim();
 
-            // Extract price (stored as array [299000])
+            // Extract price
             const priceObj = listing.price || {};
             const price = getValue(priceObj.selling_price) || getValue(priceObj.rental_price) || priceObj;
 
