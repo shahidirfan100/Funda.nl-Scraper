@@ -39,47 +39,48 @@ const proxyConfig = await Actor.createProxyConfiguration(proxyConfiguration);
 let pagesVisited = 0;
 const collectedIds = new Set();
 
-// Resolve Nuxt 3 flattened array references
-function resolveNuxtValue(data, val, depth = 0) {
-    if (depth > 5) return val;
-    if (typeof val === 'number' && val >= 0 && val < data.length) {
-        const target = data[val];
-        if (Array.isArray(target)) {
-            return target.map(i => resolveNuxtValue(data, i, depth + 1));
-        } else if (target && typeof target === 'object') {
-            const resolved = {};
-            for (const key in target) {
-                resolved[key] = resolveNuxtValue(data, target[key], depth + 1);
-            }
-            return resolved;
-        }
-        return target;
+// Resolve Nuxt 3 flattened array references with circular reference protection
+function resolve(data, val, seen = new Set()) {
+    if (typeof val !== 'number' || val < 0 || val >= data.length) return val;
+    if (seen.has(val)) return null; // Circular reference
+    seen.add(val);
+
+    const item = data[val];
+    if (item === null || typeof item !== 'object') return item;
+
+    if (Array.isArray(item)) {
+        return item.map(i => resolve(data, i, new Set(seen)));
     }
-    return val;
+
+    const res = {};
+    for (const key in item) {
+        res[key] = resolve(data, item[key], new Set(seen));
+    }
+    return res;
 }
 
-// Find listings in Nuxt 3 data
-function findListingsInNuxtData(data) {
+// Find and resolve all listings from Nuxt 3 data
+function extractListings(data) {
     for (let i = 0; i < data.length; i++) {
         const item = data[i];
         if (item && typeof item === 'object' && item.listings !== undefined) {
-            const listingsArray = data[item.listings];
-            if (Array.isArray(listingsArray)) {
-                return listingsArray.map(idx => {
-                    const obj = data[idx];
-                    if (obj && typeof obj === 'object') {
-                        const resolved = {};
-                        for (const key in obj) {
-                            resolved[key] = resolveNuxtValue(data, obj[key], 0);
-                        }
-                        return resolved;
-                    }
-                    return null;
-                }).filter(Boolean);
+            const listings = resolve(data, item.listings);
+            if (Array.isArray(listings) && listings.length > 0) {
+                // Check if this looks like real property listings
+                const first = listings[0];
+                if (first && (first.address || first.price || first.id)) {
+                    return listings;
+                }
             }
         }
     }
     return null;
+}
+
+// Extract value from array or direct value (Nuxt stores single values as arrays)
+function getValue(val) {
+    if (Array.isArray(val)) return val[0];
+    return val;
 }
 
 const crawler = new CheerioCrawler({
@@ -116,7 +117,7 @@ const crawler = new CheerioCrawler({
         }
 
         const data = JSON.parse(nuxtDataScript);
-        const listings = findListingsInNuxtData(data);
+        const listings = extractListings(data);
 
         if (!listings || listings.length === 0) {
             log.warning('No listings found');
@@ -128,29 +129,50 @@ const crawler = new CheerioCrawler({
 
         for (let i = 0; i < listings.length && remaining > 0; i++) {
             const listing = listings[i];
-            const id = listing.id || listing.globalId || listing.object_detail_page_relative_url || `${pagesVisited}-${i}`;
-            if (collectedIds.has(id)) continue;
-            collectedIds.add(id);
 
-            let url = listing.object_detail_page_relative_url || listing.url;
+            // Extract ID from URL path or use internal id
+            const urlPath = listing.object_detail_page_relative_url || '';
+            const urlIdMatch = urlPath.match(/\/(\d+)\/?$/);
+            const propertyId = urlIdMatch ? urlIdMatch[1] : (listing.id || `${pagesVisited}-${i}`);
+
+            if (collectedIds.has(propertyId)) continue;
+            collectedIds.add(propertyId);
+
+            // Build full URL
+            let url = listing.object_detail_page_relative_url;
             if (url && !url.startsWith('http')) url = `https://www.funda.nl${url}`;
 
+            // Extract address components (Nuxt uses street_name not street)
+            const addr = listing.address || {};
+            const streetName = addr.street_name || addr.street || '';
+            const houseNumber = addr.house_number || '';
+            const fullAddress = `${streetName} ${houseNumber}`.trim();
+
+            // Extract price (stored as array [299000])
+            const priceObj = listing.price || {};
+            const price = getValue(priceObj.selling_price) || getValue(priceObj.rental_price) || priceObj;
+
             itemsToPush.push({
-                id: listing.id || listing.globalId || id,
-                address: typeof listing.address === 'object'
-                    ? `${listing.address.street || ''} ${listing.address.house_number || ''}`.trim()
-                    : listing.address,
-                postalCode: listing.address?.postal_code,
-                city: listing.address?.city,
-                price: typeof listing.price === 'object' ? listing.price.selling_price : listing.price,
+                id: propertyId,
+                address: fullAddress,
+                postalCode: addr.postal_code,
+                city: addr.city,
+                municipality: addr.municipality,
+                province: addr.province,
+                neighbourhood: addr.neighbourhood,
+                price: typeof price === 'number' ? price : null,
+                priceCondition: priceObj.selling_price_condition,
                 priceCurrency: "EUR",
-                floorArea: listing.floor_area,
-                plotArea: listing.plot_area,
+                floorArea: getValue(listing.floor_area),
+                plotArea: getValue(listing.plot_area),
                 rooms: listing.number_of_rooms,
                 bedrooms: listing.number_of_bedrooms,
-                url,
-                imageUrl: listing.images?.[0]?.url || listing.photo,
                 energyLabel: listing.energy_label,
+                objectType: listing.object_type,
+                constructionType: listing.construction_type,
+                status: listing.status,
+                publishDate: listing.publish_date,
+                url,
                 scrapedAt: new Date().toISOString()
             });
             remaining--;
