@@ -165,6 +165,13 @@ const crawler = new CheerioCrawler({
             return;
         }
 
+        // Debug: Log first listing's keys to see available fields
+        if (listings.length > 0) {
+            const firstListing = listings[0];
+            log.info(`First listing fields: ${Object.keys(firstListing).join(', ')}`);
+            log.info(`thumbnail_id value: ${JSON.stringify(firstListing.thumbnail_id)}`);
+        }
+
         let remaining = results_wanted - collectedIds.size;
         const itemsToPush = [];
 
