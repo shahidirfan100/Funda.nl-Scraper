@@ -1,0 +1,73 @@
+{
+  "actorSpecification": 1,
+  "fields": {},
+  "views": {
+    "overview": {
+      "title": "Overview",
+      "transformation": {
+        "fields": [
+          "id",
+          "address",
+          "postalCode",
+          "city",
+          "price",
+          "priceCurrency",
+          "floorArea",
+          "plotArea",
+          "rooms",
+          "url",
+          "imageUrl"
+        ]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "id": {
+            "label": "ID",
+            "format": "text"
+          },
+          "address": {
+            "label": "Address",
+            "format": "text"
+          },
+          "postalCode": {
+            "label": "Postal Code",
+            "format": "text"
+          },
+          "city": {
+            "label": "City",
+            "format": "text"
+          },
+          "price": {
+            "label": "Price",
+            "format": "text"
+          },
+          "priceCurrency": {
+            "label": "Currency",
+            "format": "text"
+          },
+          "floorArea": {
+            "label": "Floor Area (m²)",
+            "format": "text"
+          },
+          "plotArea": {
+            "label": "Plot Area (m²)",
+            "format": "text"
+          },
+          "rooms": {
+            "label": "Rooms",
+            "format": "text"
+          },
+          "url": {
+            "label": "URL",
+            "format": "text"
+          },
+          "imageUrl": {
+            "label": "Image",
+            "format": "text"
+          }
+        }
+      }
+    }
+  }
+}

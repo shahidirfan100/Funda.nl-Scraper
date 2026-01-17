@@ -1,0 +1,85 @@
+{
+  "title": "Funda.nl Scraper",
+  "description": "Scrape real estate listings from Funda.nl. Provide a start URL or use location/property type filters.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "startUrl": {
+      "title": "Start URL",
+      "type": "string",
+      "description": "Start scraping from a specific Funda.nl search URL. If provided, this will be used instead of location filter.",
+      "editor": "textfield",
+      "prefill": "https://www.funda.nl/en/zoeken/koop/"
+    },
+    "location": {
+      "title": "Location",
+      "type": "string",
+      "description": "City or area to search in (e.g., 'amsterdam', 'rotterdam'). Used if Start URL is not provided.",
+      "editor": "textfield"
+    },
+    "propertyType": {
+      "title": "Property Type",
+      "type": "string",
+      "description": "Type of property to search for.",
+      "editor": "select",
+      "enum": [
+        "koop",
+        "huur"
+      ],
+      "enumTitles": [
+        "For Sale (koop)",
+        "For Rent (huur)"
+      ],
+      "default": "koop"
+    },
+    "minPrice": {
+      "title": "Minimum Price (€)",
+      "type": "integer",
+      "description": "Minimum price filter.",
+      "editor": "number"
+    },
+    "maxPrice": {
+      "title": "Maximum Price (€)",
+      "type": "integer",
+      "description": "Maximum price filter.",
+      "editor": "number"
+    },
+    "collectDetails": {
+      "title": "Collect property details",
+      "type": "boolean",
+      "description": "If enabled, scraper opens property detail pages for full information.",
+      "editor": "checkbox",
+      "default": false
+    },
+    "results_wanted": {
+      "title": "Maximum number of listings",
+      "type": "integer",
+      "description": "The maximum number of property listings to collect.",
+      "minimum": 1,
+      "default": 20,
+      "editor": "number"
+    },
+    "max_pages": {
+      "title": "Maximum number of pages",
+      "type": "integer",
+      "description": "A safety cap on the number of search result pages to visit.",
+      "minimum": 1,
+      "editor": "number",
+      "default": 10
+    },
+    "proxyConfiguration": {
+      "title": "Proxy configuration",
+      "type": "object",
+      "description": "Use Apify Proxy for reliable scraping.",
+      "editor": "proxy",
+      "default": {
+        "useApifyProxy": true,
+        "apifyProxyGroups": [
+          "RESIDENTIAL"
+        ]
+      }
+    }
+  },
+  "required": [],
+  "additionalProperties": false
+}
