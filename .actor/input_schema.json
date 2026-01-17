@@ -44,13 +44,6 @@
       "description": "Maximum price filter.",
       "editor": "number"
     },
-    "collectDetails": {
-      "title": "Collect property details",
-      "type": "boolean",
-      "description": "If enabled, scraper opens property detail pages for full information.",
-      "editor": "checkbox",
-      "default": false
-    },
     "results_wanted": {
       "title": "Maximum number of listings",
       "type": "integer",
