@@ -111,6 +111,19 @@ function getValue(val) {
     return val;
 }
 
+// Build image URL from thumbnail_id (e.g., 223359004 -> https://cloud.funda.nl/valentina_media/223/359/004.jpg)
+function buildImageUrl(thumbnailId) {
+    const id = getValue(thumbnailId);
+    if (!id) return null;
+
+    const idStr = String(id).padStart(9, '0');
+    const part1 = idStr.slice(0, 3);
+    const part2 = idStr.slice(3, 6);
+    const part3 = idStr.slice(6, 9);
+
+    return `https://cloud.funda.nl/valentina_media/${part1}/${part2}/${part3}.jpg`;
+}
+
 const crawler = new CheerioCrawler({
     maxConcurrency: 5,
     maxRequestRetries: 3,
@@ -200,6 +213,7 @@ const crawler = new CheerioCrawler({
                 constructionType: listing.construction_type,
                 status: listing.status,
                 publishDate: listing.publish_date,
+                imageUrl: buildImageUrl(listing.thumbnail_id),
                 url,
                 scrapedAt: new Date().toISOString()
             });
