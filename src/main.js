@@ -61,19 +61,47 @@ function resolve(data, val, seen = new Set()) {
 
 // Find and resolve all listings from Nuxt 3 data
 function extractListings(data) {
+    log.info(`Searching ${data.length} elements for listings...`);
+
     for (let i = 0; i < data.length; i++) {
         const item = data[i];
         if (item && typeof item === 'object' && item.listings !== undefined) {
+            log.info(`Found 'listings' key at index ${i}, value: ${item.listings}`);
+
             const listings = resolve(data, item.listings);
+            log.info(`Resolved listings type: ${typeof listings}, isArray: ${Array.isArray(listings)}, length: ${listings?.length || 0}`);
+
             if (Array.isArray(listings) && listings.length > 0) {
-                // Check if this looks like real property listings
                 const first = listings[0];
-                if (first && (first.address || first.price || first.id)) {
+                log.info(`First listing keys: ${first ? Object.keys(first).join(', ') : 'null'}`);
+
+                // Return if it looks like property data
+                if (first && typeof first === 'object') {
                     return listings;
                 }
             }
         }
     }
+
+    // Fallback: search for objects that look like listings directly
+    log.info('Primary search failed, trying fallback...');
+    const directListings = [];
+    for (let i = 0; i < data.length; i++) {
+        const item = data[i];
+        if (item && typeof item === 'object' &&
+            (item.object_detail_page_relative_url !== undefined ||
+                item.floor_area !== undefined ||
+                item.number_of_rooms !== undefined)) {
+            const resolved = resolve(data, i);
+            if (resolved) directListings.push(resolved);
+        }
+    }
+
+    if (directListings.length > 0) {
+        log.info(`Fallback found ${directListings.length} listings`);
+        return directListings;
+    }
+
     return null;
 }
 
